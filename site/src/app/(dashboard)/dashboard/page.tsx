@@ -4,169 +4,165 @@ import { useState } from "react";
 import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import ComingSoonModal from "@/components/ComingSoonModal";
-
-const categories = [
-  { name: "Knowledge", score: 81, color: "#10B981" },
-  { name: "Methodology", score: 65, color: "#F59E0B" },
-  { name: "Analysis", score: 74, color: "#3B82F6" },
-  { name: "Communication", score: 78, color: "#3B82F6" },
-  { name: "Self-Assessment", score: 58, color: "#F59E0B" },
-  { name: "Positioning", score: 70, color: "#3B82F6" },
-];
-
-const recentSessions = [
-  { id: "s1", mode: "Standard", focus: "Full thesis — Balanced", score: 74, color: "text-info", date: "Today" },
-  { id: "s2", mode: "Quick", focus: "Ch.4 Methodology", score: 62, color: "text-warning", date: "Yesterday" },
-  { id: "s3", mode: "Full", focus: "Full thesis — Hostile", score: 78, color: "text-success", date: "Jun 12" },
-  { id: "s4", mode: "Standard", focus: "Literature Review", score: 66, color: "text-warning", date: "Jun 11" },
-];
-
-const weakAreas = [
-  { area: "Statistical justification", section: "Ch.4 Methodology, Section 4.3", pages: "pp. 42-44" },
-  { area: "Limitations awareness", section: "Ch.6 Discussion, Section 6.4", pages: "pp. 78-80" },
-  { area: "Differential privacy tradeoffs", section: "Ch.3 Framework, Section 3.2", pages: "pp. 28-31" },
-];
+import { useProjects } from "@/context/ProjectContext";
 
 export default function DashboardPage() {
+  const { projects, getAllSessions } = useProjects();
+  const sessions = getAllSessions();
   const [modal, setModal] = useState<string | null>(null);
+
+  const totalSessions = sessions.length;
+  const avgScore = totalSessions > 0
+    ? Math.round(sessions.reduce((a, s) => a + s.overallScore, 0) / totalSessions)
+    : 0;
+  const totalQuestions = projects.reduce((a, p) => a + p.questionCount, 0);
+
+  const recentSessions = sessions.slice(0, 4);
+
+  const categoryAverages: Record<string, number[]> = {};
+  for (const s of sessions) {
+    for (const [cat, score] of Object.entries(s.categoryScores)) {
+      if (!categoryAverages[cat]) categoryAverages[cat] = [];
+      categoryAverages[cat].push(score);
+    }
+  }
+  const categoryScores = Object.entries(categoryAverages).map(([cat, scores]) => ({
+    label: cat,
+    score: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+  }));
+
+  const weakAreas = [...categoryScores].sort((a, b) => a.score - b.score).slice(0, 3);
+
+  const hasData = projects.length > 0;
 
   return (
     <>
       <TopBar title="Dashboard" />
       <div className="p-6 animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-xl font-bold text-foreground">Welcome back, Amara</h2>
-            <p className="text-sm text-text-secondary">PhD Computer Science — Federated Learning for Healthcare</p>
-          </div>
-          <div className="flex gap-3">
-            <Link
-              href="/sessions/new"
-              className="bg-brand text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-brand-hover transition"
-            >
-              Start Practice
+        {!hasData ? (
+          <div className="text-center py-20">
+            <div className="w-20 h-20 bg-brand-light rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">🎓</span>
+            </div>
+            <h2 className="text-xl font-bold text-foreground mb-2">Welcome to VivaBot</h2>
+            <p className="text-sm text-text-secondary mb-6 max-w-md mx-auto">Upload your thesis or research document to get started. We&apos;ll extract your content, generate questions, and prepare your AI examiner.</p>
+            <Link href="/projects/new" className="inline-block bg-brand text-white font-semibold px-8 py-3 rounded-xl hover:bg-brand-hover transition">
+              Upload Your First Document
             </Link>
-            <button
-              onClick={() => setModal("invite")}
-              className="border border-border text-sm font-medium px-4 py-2.5 rounded-lg text-text-secondary hover:border-brand/30 hover:text-brand transition"
-            >
-              Invite Supervisor
-            </button>
           </div>
-        </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-4">
+            {/* Readiness Gauge */}
+            <div className="bg-white border border-border rounded-xl p-5 row-span-2">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">Defense Readiness</h3>
+              <div className="flex justify-center mb-4">
+                <div className="relative w-36 h-36">
+                  <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="#F3F4F6" strokeWidth="8" />
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="#6B1D2A" strokeWidth="8" strokeDasharray={`${avgScore * 2.64} 264`} strokeLinecap="round" />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-3xl font-black text-brand">{avgScore || "—"}</span>
+                    <span className="text-[10px] text-text-tertiary">of 100</span>
+                  </div>
+                </div>
+              </div>
 
-        {/* Top cards */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          {/* Readiness Gauge */}
-          <div className="bg-white border border-border rounded-xl p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary mb-4">Readiness Score</p>
-            <div className="flex items-center justify-center mb-3">
-              <div className="relative w-28 h-28">
-                <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-                  <circle cx="60" cy="60" r="52" fill="none" stroke="#E5E0DB" strokeWidth="10" />
-                  <circle cx="60" cy="60" r="52" fill="none" stroke="#6B1D2A" strokeWidth="10"
-                    strokeDasharray={`${72 * 3.267} ${326.7 - 72 * 3.267}`}
-                    strokeLinecap="round" />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-3xl font-extrabold text-brand">72</span>
-                  <span className="text-[10px] font-semibold text-success">Ready</span>
+              {categoryScores.length > 0 && (
+                <div className="space-y-2">
+                  {categoryScores.map((c) => (
+                    <div key={c.label}>
+                      <div className="flex justify-between text-[10px] mb-0.5">
+                        <span className="text-text-secondary">{c.label}</span>
+                        <span className="font-bold text-foreground">{c.score}</span>
+                      </div>
+                      <div className="h-1.5 bg-surface-2 rounded-full overflow-hidden">
+                        <div className="h-full bg-brand rounded-full" style={{ width: `${c.score}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 pt-3 border-t border-border-light grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-lg font-black text-foreground">{totalSessions}</p>
+                  <p className="text-[9px] text-text-tertiary">Sessions</p>
+                </div>
+                <div>
+                  <p className="text-lg font-black text-foreground">{projects.length}</p>
+                  <p className="text-[9px] text-text-tertiary">Projects</p>
+                </div>
+                <div>
+                  <p className="text-lg font-black text-foreground">{totalQuestions}</p>
+                  <p className="text-[9px] text-text-tertiary">Questions</p>
                 </div>
               </div>
             </div>
-            <p className="text-center text-xs text-success font-medium">+8 from last week</p>
-          </div>
 
-          {/* Category Scores */}
-          <div className="bg-white border border-border rounded-xl p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary mb-3">Category Scores</p>
-            <div className="space-y-2.5">
-              {categories.map((c) => (
-                <div key={c.name} className="flex items-center gap-3">
-                  <span className="text-[11px] text-foreground w-24 truncate">{c.name}</span>
-                  <div className="flex-1 h-1.5 bg-surface-2 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${c.score}%`, backgroundColor: c.color }} />
-                  </div>
-                  <span className="text-[11px] font-bold w-7 text-right" style={{ color: c.color }}>{c.score}</span>
+            {/* Quick Actions */}
+            <div className="col-span-2 grid grid-cols-3 gap-3">
+              <Link href="/sessions/new" className="bg-brand text-white rounded-xl p-5 hover:bg-brand-hover transition">
+                <p className="text-sm font-bold">Start Practice</p>
+                <p className="text-[10px] text-white/70 mt-1">Begin a new viva session</p>
+              </Link>
+              <Link href="/projects/new" className="bg-white border border-border rounded-xl p-5 hover:border-brand/30 transition">
+                <p className="text-sm font-bold text-foreground">Upload Document</p>
+                <p className="text-[10px] text-text-secondary mt-1">Add a new thesis or paper</p>
+              </Link>
+              <button onClick={() => setModal("invite")} className="bg-white border border-border rounded-xl p-5 hover:border-brand/30 transition text-left">
+                <p className="text-sm font-bold text-foreground">Invite Supervisor</p>
+                <p className="text-[10px] text-text-secondary mt-1">Share progress</p>
+              </button>
+            </div>
+
+            {/* Recent Sessions */}
+            <div className="col-span-2 bg-white border border-border rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold text-foreground">Recent Sessions</h3>
+                <Link href="/sessions" className="text-[10px] text-brand font-semibold hover:underline">View all</Link>
+              </div>
+              {recentSessions.length === 0 ? (
+                <p className="text-xs text-text-tertiary text-center py-6">No sessions yet. Start practicing!</p>
+              ) : (
+                <div className="space-y-2">
+                  {recentSessions.map((s) => {
+                    const proj = projects.find((p) => p.id === s.projectId);
+                    return (
+                      <Link key={s.id} href={`/sessions/${s.id}/feedback?project=${s.projectId}`} className="flex items-center justify-between p-3 rounded-lg hover:bg-surface transition">
+                        <div>
+                          <p className="text-xs font-medium text-foreground capitalize">{s.mode} &middot; {s.style}</p>
+                          <p className="text-[10px] text-text-tertiary">{proj?.title.slice(0, 40)} &middot; {new Date(s.date).toLocaleDateString()}</p>
+                        </div>
+                        <div className={`text-sm font-bold ${s.overallScore >= 75 ? "text-success" : s.overallScore >= 60 ? "text-warning" : "text-error"}`}>
+                          {s.overallScore}
+                        </div>
+                      </Link>
+                    );
+                  })}
                 </div>
-              ))}
+              )}
             </div>
-          </div>
 
-          {/* Countdown */}
-          <div className="bg-white border border-border rounded-xl p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary mb-3">Defense Countdown</p>
-            <div className="text-center mb-4">
-              <span className="text-5xl font-extrabold text-accent">24</span>
-              <p className="text-xs text-text-secondary mt-1">days remaining</p>
-            </div>
-            <div className="space-y-2 text-xs text-text-secondary">
-              <div className="flex justify-between"><span>Practice streak</span><span className="font-bold text-foreground">5 days</span></div>
-              <div className="flex justify-between"><span>Sessions completed</span><span className="font-bold text-foreground">12</span></div>
-              <div className="flex justify-between"><span>Total practice</span><span className="font-bold text-foreground">4h 5m</span></div>
-            </div>
-            <button
-              onClick={() => setModal("streak")}
-              className="w-full mt-3 py-2 bg-accent-light text-brand-secondary text-[11px] font-semibold rounded-lg hover:bg-brand-secondary-light transition"
-            >
-              View Milestones
-            </button>
-          </div>
-        </div>
-
-        {/* Bottom row */}
-        <div className="grid grid-cols-2 gap-4">
-          {/* Recent Sessions */}
-          <div className="bg-white border border-border rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">Recent Sessions</p>
-              <Link href="/sessions" className="text-[11px] text-brand font-medium hover:underline">View all</Link>
-            </div>
-            <div className="space-y-1">
-              {recentSessions.map((s) => (
-                <Link key={s.id} href={`/sessions/${s.id}/feedback`} className="flex items-center gap-3 py-2.5 px-2 rounded-lg hover:bg-surface transition">
-                  <span className="text-[10px] font-semibold bg-brand-light text-brand px-2 py-0.5 rounded">{s.mode}</span>
-                  <span className="text-[11px] text-text-secondary flex-1 truncate">{s.focus}</span>
-                  <span className={`text-sm font-bold ${s.color}`}>{s.score}</span>
-                  <span className="text-[10px] text-text-tertiary w-16 text-right">{s.date}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          {/* Weak Areas */}
-          <div className="bg-white border border-border rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">Areas to Improve</p>
-              <Link href="/analytics" className="text-[11px] text-brand font-medium hover:underline">Full analysis</Link>
-            </div>
-            <div className="space-y-3">
-              {weakAreas.map((w) => (
-                <div key={w.area} className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-[12px] font-semibold text-foreground">{w.area}</p>
-                    <p className="text-[10px] text-text-tertiary">{w.section} — {w.pages}</p>
-                  </div>
-                  <Link
-                    href="/sessions/new"
-                    className="text-[10px] font-semibold text-brand hover:underline whitespace-nowrap"
-                  >
-                    Practice this
-                  </Link>
+            {/* Weak Areas */}
+            {weakAreas.length > 0 && (
+              <div className="col-span-3 bg-white border border-border rounded-xl p-5">
+                <h3 className="text-xs font-semibold text-foreground mb-3">Areas to Focus On</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  {weakAreas.map((w) => (
+                    <div key={w.label} className="bg-warning-light/50 border border-warning/20 rounded-lg p-3">
+                      <p className="text-xs font-semibold text-foreground">{w.label}</p>
+                      <p className="text-lg font-black text-warning mt-1">{w.score}</p>
+                      <Link href="/sessions/new" className="text-[10px] text-brand font-semibold hover:underline mt-1 inline-block">Practice this →</Link>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
-        </div>
+        )}
       </div>
-
-      {modal === "invite" && (
-        <ComingSoonModal title="Invite Supervisor" description="Share your readiness dashboard with your supervisor so they can track your preparation progress. Coming in V1." onClose={() => setModal(null)} />
-      )}
-      {modal === "streak" && (
-        <ComingSoonModal title="Milestones & Achievements" description="Track your preparation milestones — first session, 5-day streak, score improvements, and more. Coming in V1." onClose={() => setModal(null)} />
-      )}
+      {modal === "invite" && <ComingSoonModal title="Invite Supervisor" description="Share your progress with your supervisor via email. Coming in V1." onClose={() => setModal(null)} />}
     </>
   );
 }

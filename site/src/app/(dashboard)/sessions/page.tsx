@@ -4,24 +4,30 @@ import { useState } from "react";
 import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import ComingSoonModal from "@/components/ComingSoonModal";
+import { useProjects } from "@/context/ProjectContext";
 
-const sessions = [
-  { id: "s1", mode: "Standard", style: "Balanced", focus: "Full thesis", iface: "Text", score: 74, readiness: "Ready", date: "Jun 15, 2026", duration: "14:32" },
-  { id: "s2", mode: "Quick", style: "Friendly", focus: "Ch.4 Methodology", iface: "Text", score: 62, readiness: "Approaching", date: "Jun 14, 2026", duration: "4:58" },
-  { id: "s3", mode: "Full Defense", style: "Hostile", focus: "Full thesis", iface: "Voice", score: 78, readiness: "Ready", date: "Jun 12, 2026", duration: "43:21" },
-  { id: "s4", mode: "Standard", style: "Balanced", focus: "Literature Review", iface: "Text", score: 66, readiness: "Approaching", date: "Jun 11, 2026", duration: "15:07" },
-  { id: "s5", mode: "Quick", style: "Friendly", focus: "Ch.5 Results", iface: "Text", score: 71, readiness: "Ready", date: "Jun 10, 2026", duration: "5:12" },
-  { id: "s6", mode: "Standard", style: "Hostile", focus: "Methodology", iface: "Voice", score: 55, readiness: "Needs Work", date: "Jun 8, 2026", duration: "14:45" },
-];
-
-function badge(readiness: string) {
-  if (readiness === "Ready") return "bg-success-light text-success";
-  if (readiness === "Approaching") return "bg-warning-light text-warning";
+function badge(score: number) {
+  if (score >= 75) return "bg-success-light text-success";
+  if (score >= 60) return "bg-warning-light text-warning";
   return "bg-error-light text-error";
 }
 
+function readiness(score: number) {
+  if (score >= 75) return "Ready";
+  if (score >= 60) return "Approaching";
+  return "Needs Work";
+}
+
+function fmtDuration(s: number) {
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
 export default function SessionsPage() {
+  const { getAllSessions, projects } = useProjects();
+  const sessions = getAllSessions();
   const [modal, setModal] = useState<string | null>(null);
+
+  const getProjectForSession = (projectId: string) => projects.find((p) => p.id === projectId);
 
   return (
     <>
@@ -38,34 +44,50 @@ export default function SessionsPage() {
           </div>
         </div>
 
-        <div className="bg-white border border-border rounded-xl overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border-light">
-                {["Date", "Mode", "Style", "Focus", "Interface", "Duration", "Score", "Readiness", ""].map((h) => (
-                  <th key={h} className="text-left text-[10px] font-semibold text-text-tertiary uppercase tracking-wider px-4 py-3">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((s) => (
-                <tr key={s.id} className="border-b border-border-light last:border-none hover:bg-surface transition">
-                  <td className="px-4 py-3 text-xs text-text-secondary">{s.date}</td>
-                  <td className="px-4 py-3"><span className="text-[10px] font-semibold bg-brand-light text-brand px-2 py-0.5 rounded">{s.mode}</span></td>
-                  <td className="px-4 py-3 text-xs text-text-secondary">{s.style}</td>
-                  <td className="px-4 py-3 text-xs text-foreground font-medium">{s.focus}</td>
-                  <td className="px-4 py-3 text-xs text-text-secondary">{s.iface}</td>
-                  <td className="px-4 py-3 text-xs text-text-secondary font-mono">{s.duration}</td>
-                  <td className="px-4 py-3 text-sm font-bold text-brand">{s.score}</td>
-                  <td className="px-4 py-3"><span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${badge(s.readiness)}`}>{s.readiness}</span></td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/sessions/${s.id}/feedback`} className="text-[11px] text-brand font-semibold hover:underline">View</Link>
-                  </td>
+        {sessions.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="w-16 h-16 bg-surface-2 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" /></svg>
+            </div>
+            <h3 className="text-sm font-bold text-foreground mb-1">No sessions yet</h3>
+            <p className="text-xs text-text-secondary mb-4">Start a practice session to see your results here</p>
+            <Link href="/sessions/new" className="inline-block bg-brand text-white text-sm font-semibold px-6 py-2.5 rounded-lg hover:bg-brand-hover transition">
+              Start Your First Session
+            </Link>
+          </div>
+        ) : (
+          <div className="bg-white border border-border rounded-xl overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border-light">
+                  {["Date", "Project", "Mode", "Style", "Duration", "Questions", "Score", "Readiness", ""].map((h) => (
+                    <th key={h} className="text-left text-[10px] font-semibold text-text-tertiary uppercase tracking-wider px-4 py-3">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {sessions.map((s) => {
+                  const proj = getProjectForSession(s.projectId);
+                  return (
+                    <tr key={s.id} className="border-b border-border-light last:border-none hover:bg-surface transition">
+                      <td className="px-4 py-3 text-xs text-text-secondary">{new Date(s.date).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-xs text-foreground font-medium">{proj?.title.slice(0, 30) || "Unknown"}…</td>
+                      <td className="px-4 py-3"><span className="text-[10px] font-semibold bg-brand-light text-brand px-2 py-0.5 rounded capitalize">{s.mode}</span></td>
+                      <td className="px-4 py-3 text-xs text-text-secondary capitalize">{s.style}</td>
+                      <td className="px-4 py-3 text-xs text-text-secondary font-mono">{fmtDuration(s.duration)}</td>
+                      <td className="px-4 py-3 text-xs text-text-secondary">{s.questionsAsked.length}</td>
+                      <td className="px-4 py-3 text-sm font-bold text-brand">{s.overallScore}</td>
+                      <td className="px-4 py-3"><span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${badge(s.overallScore)}`}>{readiness(s.overallScore)}</span></td>
+                      <td className="px-4 py-3 text-right">
+                        <Link href={`/sessions/${s.id}/feedback?project=${s.projectId}`} className="text-[11px] text-brand font-semibold hover:underline">View</Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
       {modal && <ComingSoonModal title="Filter Sessions" description="Filter sessions by mode, style, date range, and score. Coming in V1." onClose={() => setModal(null)} />}
     </>

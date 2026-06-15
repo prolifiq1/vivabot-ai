@@ -1,38 +1,113 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ComingSoonModal from "@/components/ComingSoonModal";
+import { useProjects } from "@/context/ProjectContext";
+import { getVivaQuestions, GeneratedQuestion } from "@/lib/question-generator";
 
-const initialMessages = [
-  { role: "examiner", text: "Welcome to your viva voce examination. I'm Dr. Okonkwo, your primary examiner. I've read your thesis on Federated Learning for Privacy-Preserving Healthcare Analytics. Let's begin with a broad question." },
-  { role: "examiner", text: "Can you summarize the central contribution of your thesis in two or three sentences?" },
-];
+interface Message {
+  role: "examiner" | "student" | "system";
+  text: string;
+}
 
-const mockResponses = [
-  "That's an interesting point. Now, why did you choose federated learning over a centralized machine learning approach for healthcare data?",
-  "Your thesis mentions differential privacy with epsilon=1.0. How did you determine that this was the appropriate privacy budget?",
-  "Let's discuss your sample size. N=47 hospitals seems relatively small for a federated system. How did you determine this was sufficient for generalizability?",
-  "How does your work extend beyond the FedAvg algorithm proposed by McMahan et al. in 2017?",
-  "What are the main limitations of your approach, and how would you address them in future work?",
-  "Thank you. That concludes this session. You can review your feedback now.",
-];
+function getExaminerName(style: string) {
+  if (style === "hostile") return "Prof. Blackwell";
+  if (style === "friendly") return "Dr. Mensah";
+  return "Dr. Okonkwo";
+}
 
-export default function ActiveSessionPage() {
+function generateFollowUp(question: GeneratedQuestion, style: string): string {
+  const followUps: Record<string, string[]> = {
+    friendly: [
+      "That's a good start. Could you elaborate a bit more on the specifics?",
+      "Interesting. Can you connect that back to your theoretical framework?",
+      "I see your reasoning. How does that compare to what you expected?",
+      "Nice answer. What evidence from your data directly supports that claim?",
+    ],
+    balanced: [
+      "Can you be more specific about the evidence supporting that claim?",
+      "How would you respond to someone who disagrees with that interpretation?",
+      "That's one perspective. What about alternative explanations?",
+      "Let's dig deeper. What were the exact numbers behind that conclusion?",
+    ],
+    hostile: [
+      "That's rather vague. I need you to be much more precise.",
+      "I'm not convinced. What makes you so sure about that?",
+      "A reviewer would challenge that. Defend your position more rigorously.",
+      "That contradicts what you wrote on page... Can you explain this inconsistency?",
+    ],
+  };
+  const pool = followUps[style] || followUps.balanced;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function scoreAnswer(answer: string, question: GeneratedQuestion): number {
+  let score = 50;
+  const words = answer.split(/\s+/).length;
+  if (words > 20) score += 10;
+  if (words > 50) score += 10;
+  if (words > 100) score += 5;
+  if (answer.match(/because|therefore|however|although|specifically|furthermore/i)) score += 8;
+  if (answer.match(/\d+%|\d+\.\d+|statistic|significant|p-value/i)) score += 7;
+  if (answer.match(/method|approach|framework|theory|hypothesis|model/i)) score += 5;
+  if (answer.match(/limitation|challenge|future|recommend/i)) score += 5;
+  const contextTerms = question.context.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+  const answerLower = answer.toLowerCase();
+  const matchedTerms = contextTerms.filter((t) => answerLower.includes(t)).length;
+  score += Math.min(matchedTerms * 3, 15);
+  return Math.min(Math.max(score, 30), 95);
+}
+
+function ActiveSessionInner() {
   const router = useRouter();
-  const [messages, setMessages] = useState(initialMessages);
+  const searchParams = useSearchParams();
+  const { getProject, addSession } = useProjects();
+
+  const projectId = searchParams.get("project") || "";
+  const mode = searchParams.get("mode") || "standard";
+  const style = searchParams.get("style") || "balanced";
+  const count = parseInt(searchParams.get("count") || "8", 10);
+
+  const project = getProject(projectId);
+  const examinerName = getExaminerName(style);
+
+  const [vivaQuestions, setVivaQuestions] = useState<GeneratedQuestion[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
-  const [responseIdx, setResponseIdx] = useState(0);
+  const [questionIdx, setQuestionIdx] = useState(0);
+  const [answersGiven, setAnswersGiven] = useState<{ question: string; answer: string; score: number }[]>([]);
   const [modal, setModal] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [sessionEnded, setSessionEnded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const initialized = useRef(false);
 
   useEffect(() => {
+    if (!project || initialized.current) return;
+    initialized.current = true;
+    const questions = getVivaQuestions(project.questions, count);
+    setVivaQuestions(questions);
+
+    const greeting = style === "hostile"
+      ? `I'm ${examinerName}. I've thoroughly reviewed your ${project.type} titled "${project.title}". I have serious questions. Let's begin.`
+      : style === "friendly"
+        ? `Welcome! I'm ${examinerName}, and I'll be guiding you through your viva today. I've carefully read your ${project.type} on "${project.title}" and I'm impressed with the scope. Let's work through some questions together.`
+        : `Welcome to your viva voce examination. I'm ${examinerName}, your primary examiner. I've read your ${project.type} titled "${project.title}". Let's begin.`;
+
+    setMessages([
+      { role: "examiner", text: greeting },
+      { role: "examiner", text: questions[0]?.question || "Tell me about the central contribution of your research." },
+    ]);
+  }, [project, count, style, examinerName]);
+
+  useEffect(() => {
+    if (sessionEnded) return;
     const t = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [sessionEnded]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -40,24 +115,114 @@ export default function ActiveSessionPage() {
 
   const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
+  const endSession = useCallback(() => {
+    if (sessionEnded || !project) return;
+    setSessionEnded(true);
+
+    const categoryScores: Record<string, number[]> = {};
+    for (const a of answersGiven) {
+      const q = vivaQuestions.find((vq) => vq.question === a.question);
+      const cat = q?.category || "Knowledge";
+      if (!categoryScores[cat]) categoryScores[cat] = [];
+      categoryScores[cat].push(a.score);
+    }
+
+    const avgScores: Record<string, number> = {};
+    for (const [cat, scores] of Object.entries(categoryScores)) {
+      avgScores[cat] = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    }
+
+    const overall = answersGiven.length > 0
+      ? Math.round(answersGiven.reduce((a, b) => a + b.score, 0) / answersGiven.length)
+      : 0;
+
+    const sorted = [...answersGiven].sort((a, b) => a.score - b.score);
+    const strengths = sorted.slice(-3).reverse().map((a) => `Strong answer on: "${a.question.slice(0, 80)}…"`);
+    const improvements = sorted.slice(0, 3).map((a) => `Needs improvement: "${a.question.slice(0, 80)}…"`);
+
+    const sessionRecord = {
+      id: "s_" + Date.now().toString(36),
+      projectId: project.id,
+      mode,
+      style,
+      focus: "Full thesis",
+      date: new Date().toISOString(),
+      duration: elapsed,
+      questionsAsked: answersGiven,
+      overallScore: overall,
+      categoryScores: avgScores,
+      strengths,
+      improvements,
+    };
+
+    addSession(sessionRecord);
+
+    setTimeout(() => {
+      router.push(`/sessions/${sessionRecord.id}/feedback?project=${project.id}`);
+    }, 2000);
+  }, [sessionEnded, project, answersGiven, vivaQuestions, elapsed, mode, style, addSession, router]);
+
   const send = () => {
-    if (!input.trim()) return;
+    if (!input.trim() || typing || sessionEnded) return;
     const userMsg = input.trim();
     setInput("");
     setMessages((m) => [...m, { role: "student", text: userMsg }]);
+
+    const currentQ = vivaQuestions[questionIdx];
+    if (currentQ) {
+      const score = scoreAnswer(userMsg, currentQ);
+      setAnswersGiven((prev) => [...prev, { question: currentQ.question, answer: userMsg, score }]);
+    }
+
     setTyping(true);
 
+    const delay = 1200 + Math.random() * 1200;
     setTimeout(() => {
       setTyping(false);
-      if (responseIdx < mockResponses.length) {
-        setMessages((m) => [...m, { role: "examiner", text: mockResponses[responseIdx] }]);
-        setResponseIdx((i) => i + 1);
+      const nextIdx = questionIdx + 1;
+
+      if (nextIdx >= vivaQuestions.length) {
+        const closingMsg = style === "hostile"
+          ? "We've covered the main areas. I have my assessment. This examination is concluded."
+          : style === "friendly"
+            ? "That was excellent work! We've covered all the key areas. Let me prepare your feedback."
+            : "Thank you. That concludes our examination. I'll prepare your detailed feedback now.";
+        setMessages((m) => [...m, { role: "examiner", text: closingMsg }]);
+        setQuestionIdx(nextIdx);
+        endSession();
+      } else {
+        const shouldFollowUp = Math.random() < 0.3 && userMsg.split(/\s+/).length < 30;
+        if (shouldFollowUp && currentQ) {
+          const followUp = generateFollowUp(currentQ, style);
+          setMessages((m) => [...m, { role: "examiner", text: followUp }]);
+        } else {
+          const transition = [
+            "Good. Let's move on.",
+            "Noted. Next question.",
+            "I see. Let me ask you about something else.",
+            "Right. Moving forward.",
+            "Thank you. Let's continue.",
+          ];
+          const t = transition[Math.floor(Math.random() * transition.length)];
+          const nextQ = vivaQuestions[nextIdx].question;
+          setMessages((m) => [...m, { role: "examiner", text: `${t}\n\n${nextQ}` }]);
+          setQuestionIdx(nextIdx);
+        }
       }
-      if (responseIdx >= mockResponses.length - 1) {
-        setTimeout(() => router.push("/sessions/s1/feedback"), 1500);
-      }
-    }, 1800);
+    }, delay);
   };
+
+  if (!project) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-surface">
+        <div className="text-center">
+          <h2 className="text-lg font-bold text-foreground mb-2">No project selected</h2>
+          <p className="text-sm text-text-secondary mb-4">Please start a session from a project page.</p>
+          <Link href="/projects" className="text-sm text-brand font-semibold hover:underline">Go to Projects</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-surface">
@@ -69,14 +234,14 @@ export default function ActiveSessionPage() {
           </Link>
           <div>
             <p className="text-sm font-bold text-foreground">Viva Session</p>
-            <p className="text-[10px] text-text-tertiary">Standard &middot; Balanced &middot; Full thesis</p>
+            <p className="text-[10px] text-text-tertiary capitalize">{mode} &middot; {style} &middot; {project.title.slice(0, 40)}…</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs font-mono text-text-secondary bg-surface-2 px-2.5 py-1 rounded">{fmt(elapsed)}</span>
-          <span className="text-[10px] font-semibold bg-brand-light text-brand px-2 py-0.5 rounded">Q{Math.min(responseIdx + 1, mockResponses.length)}/{mockResponses.length}</span>
+          <span className="text-[10px] font-semibold bg-brand-light text-brand px-2 py-0.5 rounded">Q{Math.min(questionIdx + 1, vivaQuestions.length)}/{vivaQuestions.length}</span>
           <button onClick={() => setModal("hint")} className="text-xs text-brand font-semibold hover:underline">Hint</button>
-          <button onClick={() => router.push("/sessions/s1/feedback")} className="text-xs font-semibold text-error hover:underline">End Session</button>
+          <button onClick={endSession} className="text-xs font-semibold text-error hover:underline">End Session</button>
         </div>
       </div>
 
@@ -84,8 +249,8 @@ export default function ActiveSessionPage() {
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "student" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${m.role === "student" ? "bg-brand text-white rounded-br-md" : "bg-white border border-border text-foreground rounded-bl-md"}`}>
-              {m.role === "examiner" && <p className="text-[10px] font-semibold text-brand mb-1">Dr. Okonkwo</p>}
+            <div className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-line ${m.role === "student" ? "bg-brand text-white rounded-br-md" : "bg-white border border-border text-foreground rounded-bl-md"}`}>
+              {m.role === "examiner" && <p className="text-[10px] font-semibold text-brand mb-1">{examinerName}</p>}
               {m.text}
             </div>
           </div>
@@ -101,6 +266,11 @@ export default function ActiveSessionPage() {
             </div>
           </div>
         )}
+        {sessionEnded && (
+          <div className="text-center py-4">
+            <p className="text-xs text-text-secondary">Session ended. Redirecting to feedback...</p>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -114,15 +284,20 @@ export default function ActiveSessionPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder="Type your answer..."
-            className="flex-1 px-4 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:border-brand"
+            placeholder={sessionEnded ? "Session ended" : "Type your answer..."}
+            disabled={sessionEnded}
+            className="flex-1 px-4 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:border-brand disabled:opacity-50"
           />
-          <button onClick={send} disabled={!input.trim() || typing} className="px-5 py-2.5 bg-brand text-white rounded-lg text-sm font-semibold hover:bg-brand-hover transition disabled:opacity-40 shrink-0">Send</button>
+          <button onClick={send} disabled={!input.trim() || typing || sessionEnded} className="px-5 py-2.5 bg-brand text-white rounded-lg text-sm font-semibold hover:bg-brand-hover transition disabled:opacity-40 shrink-0">Send</button>
         </div>
       </div>
 
       {modal === "hint" && <ComingSoonModal title="AI Hint" description="Get a contextual hint from your AI coach without it counting as your answer. Coming in V1." onClose={() => setModal(null)} />}
-      {modal === "voice" && <ComingSoonModal title="Voice Input" description="Speak your answer using your microphone. Coming in V1." onClose={() => setModal(null)} />}
+      {modal === "voice" && <ComingSoonModal title="Voice Input" description="Voice input with speech-to-text is coming soon. Please type your answer for now." onClose={() => setModal(null)} />}
     </div>
   );
+}
+
+export default function ActiveSessionPage() {
+  return <Suspense fallback={<div className="flex items-center justify-center h-screen text-sm text-text-secondary">Loading session...</div>}><ActiveSessionInner /></Suspense>;
 }

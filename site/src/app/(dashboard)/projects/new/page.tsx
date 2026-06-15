@@ -4,25 +4,62 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import ComingSoonModal from "@/components/ComingSoonModal";
+import { processDocument } from "@/lib/document-processor";
+import { generateQuestions } from "@/lib/question-generator";
+import { useProjects } from "@/context/ProjectContext";
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const { addProject } = useProjects();
   const [title, setTitle] = useState("");
   const [type, setType] = useState("thesis");
   const [level, setLevel] = useState("phd");
   const [field, setField] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [rubricFile, setRubricFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [error, setError] = useState("");
   const [modal, setModal] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setUploading(true);
-    setTimeout(() => {
-      setUploading(false);
-      router.push("/projects/p1");
-    }, 2000);
+    if (!file) {
+      setError("Please upload a document.");
+      return;
+    }
+    setError("");
+    setProcessing(true);
+
+    try {
+      setProgress("Extracting text from document...");
+      const doc = await processDocument(file);
+
+      if (doc.wordCount < 100) {
+        setError("The document appears to be too short or could not be read. Please upload a valid thesis or research document.");
+        setProcessing(false);
+        return;
+      }
+
+      setProgress(`Extracted ${doc.wordCount.toLocaleString()} words across ${doc.sections.length} sections. Generating questions...`);
+
+      await new Promise((r) => setTimeout(r, 500));
+      const questions = generateQuestions(doc);
+
+      setProgress(`Generated ${questions.length} questions. Saving project...`);
+      await new Promise((r) => setTimeout(r, 300));
+
+      if (title) doc.title = title;
+
+      const projectId = addProject(doc, questions, { type, level, field });
+
+      setProgress("Done! Redirecting...");
+      await new Promise((r) => setTimeout(r, 500));
+      router.push(`/projects/${projectId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to process document. Please try again.");
+      setProcessing(false);
+    }
   };
 
   return (
@@ -34,8 +71,8 @@ export default function NewProjectPage() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-xs font-semibold text-foreground mb-1.5">Project Title</label>
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Federated Learning for Healthcare Analytics" className="w-full px-3 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand/20" required />
+            <label className="block text-xs font-semibold text-foreground mb-1.5">Project Title <span className="text-text-tertiary font-normal">(auto-detected if blank)</span></label>
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Federated Learning for Healthcare Analytics" className="w-full px-3 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand/20" />
           </div>
 
           <div className="grid grid-cols-3 gap-4">
@@ -67,9 +104,12 @@ export default function NewProjectPage() {
           <div>
             <label className="block text-xs font-semibold text-foreground mb-1.5">Primary Document *</label>
             <label className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-border rounded-xl hover:border-brand/40 transition cursor-pointer bg-surface">
-              <input type="file" className="hidden" accept=".pdf,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              <input type="file" className="hidden" accept=".pdf,.docx" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(""); }} />
               {file ? (
                 <div className="text-center">
+                  <div className="w-12 h-12 bg-brand-light rounded-lg flex items-center justify-center mx-auto mb-2">
+                    <span className="text-brand font-bold text-xs">{file.name.split(".").pop()?.toUpperCase()}</span>
+                  </div>
                   <p className="text-sm font-semibold text-foreground">{file.name}</p>
                   <p className="text-xs text-text-secondary mt-1">{(file.size / 1024 / 1024).toFixed(1)} MB</p>
                   <button type="button" onClick={(e) => { e.preventDefault(); setFile(null); }} className="text-xs text-error mt-2 hover:underline">Remove</button>
@@ -80,7 +120,7 @@ export default function NewProjectPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                   <p className="text-sm text-text-secondary">Drop your PDF or DOCX here, or <span className="text-brand font-medium">browse</span></p>
-                  <p className="text-[10px] text-text-tertiary mt-1">Max 200MB. Supported: PDF, DOCX</p>
+                  <p className="text-[10px] text-text-tertiary mt-1">Supported: PDF, DOCX</p>
                 </>
               )}
             </label>
@@ -112,16 +152,27 @@ export default function NewProjectPage() {
             </button>
           </div>
 
+          {error && (
+            <div className="bg-error-light border border-error/20 rounded-lg p-3">
+              <p className="text-xs text-error font-medium">{error}</p>
+            </div>
+          )}
+
+          {processing && (
+            <div className="bg-brand-light border border-brand/20 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <span className="w-5 h-5 border-2 border-brand/30 border-t-brand rounded-full animate-spin shrink-0" />
+                <p className="text-xs text-brand font-medium">{progress}</p>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => router.back()} className="px-6 py-2.5 border border-border rounded-lg text-sm font-medium text-text-secondary hover:bg-surface transition">
               Cancel
             </button>
-            <button type="submit" disabled={uploading} className="flex-1 py-2.5 bg-brand text-white rounded-lg text-sm font-semibold hover:bg-brand-hover transition disabled:opacity-50 flex items-center justify-center gap-2">
-              {uploading ? (
-                <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin-slow" /> Processing document...</>
-              ) : (
-                "Create Project & Process"
-              )}
+            <button type="submit" disabled={processing || !file} className="flex-1 py-2.5 bg-brand text-white rounded-lg text-sm font-semibold hover:bg-brand-hover transition disabled:opacity-50 flex items-center justify-center gap-2">
+              {processing ? "Processing..." : "Create Project & Process"}
             </button>
           </div>
         </form>
